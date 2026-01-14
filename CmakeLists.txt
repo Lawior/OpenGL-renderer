@@ -1,0 +1,51 @@
+# Minimum required version of CMake
+cmake_minimum_required(VERSION 3.10)
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Project Name
+project(3d_engine LANGUAGES C)
+
+find_package(SDL2 REQUIRED)
+
+
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS 
+    "src/*.c" 
+    "include/*.h" # not sure about this but i think it will recompile the c files if the header changes
+)
+
+add_executable(${PROJECT_NAME} main.c ${SOURCES})
+target_include_directories(3d_engine PRIVATE include)
+
+target_link_libraries(${PROJECT_NAME} 
+PRIVATE SDL2::SDL2main 
+SDL2::SDL2
+opengl32
+cglm 
+m)
+
+
+add_custom_command(TARGET 3d_engine POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "C:/msys64/ucrt64/bin/SDL2.dll"
+      "C:/msys64/ucrt64/bin/libcglm-0.dll"
+      "C:/msys64/ucrt64/bin/libwinpthread-1.dll"
+      "C:/msys64/ucrt64/bin/libgcc_s_seh-1.dll"
+      $<TARGET_FILE_DIR:3d_engine>)
+
+#copying the shaders folders into build directory, in the future i will propably move to embedding those directly in the source files
+#I just need a good script that would do that
+add_custom_target(copy_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+        "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/textures"
+        "${CMAKE_CURRENT_BINARY_DIR}/textures"
+    COMMENT "Ensuring shaders and textures are synced..."
+)
+
+add_dependencies(3d_engine copy_assets)
+
+#target_compile_definitions(3d_engine PRIVATE SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/shaders/") // this allows to add a #define that could be used in the c code but it's annoying to implement

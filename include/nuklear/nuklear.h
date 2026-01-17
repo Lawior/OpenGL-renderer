@@ -1493,7 +1493,7 @@ NK_API const struct nk_draw_command* nk__draw_next(const struct nk_draw_command*
  * NK_WINDOW_NO_SCROLLBAR      | Removes the scrollbar from the window
  * NK_WINDOW_TITLE             | Forces a header at the top at the window showing the title
  * NK_WINDOW_SCROLL_AUTO_HIDE  | Automatically hides the window scrollbar if no user interaction: also requires delta time in `nk_context` to be set each frame
- * NK_WINDOW_BACKGROUND        | Always keep window in the background
+ * `       | Always keep window in the background
  * NK_WINDOW_SCALE_LEFT        | Puts window scaler in the left-bottom corner instead right-bottom
  * NK_WINDOW_NO_INPUT          | Prevents window of scaling, moving or getting focus
  *

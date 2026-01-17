@@ -1,4 +1,5 @@
 #pragma once
+#include "3d_engine/app_state.h"
 
 void renderer_camera_move_delta_right(double delta_time);
 void renderer_camera_move_delta_left(double delta_time);
@@ -11,6 +12,6 @@ void renderer_camera_rotate(int x_rel, int y_rel);
 
 void renderer_init(int w, int h);
 void renderer_resize(int w, int h);
-void renderer_render();
+void renderer_render(AppData* data);
 void renderer_end();
 

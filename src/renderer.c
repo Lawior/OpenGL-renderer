@@ -57,6 +57,16 @@ static Texture tex1;
 
 Uniforms main_uniforms;
 
+//this sets default variables for the renderer in the opengl state machine
+//it needs to be called every loop because of different library also managing the state
+static void set_default_opengl()
+{
+    //glDisable(GL_SCISSOR_TEST); 
+    glEnable(GL_DEPTH_TEST);
+    //glEnable(GL_CULL_FACE);
+    //glDisable(GL_BLEND);
+}
+
 static void update_model_matrix(Object* obj)
 {
     glm_mat4_identity(obj->model_matrix);
@@ -156,6 +166,7 @@ static void draw_object(Object* obj)
     glBindVertexArray(obj->mesh.VAO);
     glUniformMatrix4fv(main_uniforms.model, 1, GL_FALSE, (float*)obj->model_matrix);
     glUniform4f(main_uniforms.color, 1.0, 0, 0 , 1.0);
+    glBindTexture(GL_TEXTURE_2D, tex1.id); 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //for wireframe
     glDrawElements(GL_TRIANGLES, obj->mesh.EBO_size, GL_UNSIGNED_INT, 0);
 }
@@ -318,7 +329,6 @@ void renderer_init(int w, int h)
     create_cube_object(&cube, (vec3){0,0,-2}, (vec3){0,0,0});
 
     tex1 = create_texture("epic_texture.jpg");
-    glBindTexture(GL_TEXTURE_2D, tex1.id); // for now just bind it once as we don't have other textures
 
     glClearColor(0.4f, 0.6f, 0.9f, 1.0f);
     
@@ -327,6 +337,7 @@ void renderer_init(int w, int h)
 
 void renderer_render()
 {
+    set_default_opengl();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(main_program);
 

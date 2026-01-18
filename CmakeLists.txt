@@ -9,7 +9,6 @@ project(3d_engine LANGUAGES C)
 
 find_package(SDL2 REQUIRED)
 
-
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS 
     "src/*.c" 
     "include/*.h" # not sure about this but i think it will recompile the c files if the header changes

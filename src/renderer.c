@@ -26,6 +26,7 @@ typedef struct Object
     vec3 angle;
     vec3 scale;
     mat4 model_matrix; //this is the rotation scale and position int the global coordinates
+    mat3 normal_matrix; //for now i will keep it here it's basically a model matrix but transposed and inversed, idk why this math works but it does 
     struct Mesh* mesh;
     struct Material* material;
 } Object;
@@ -38,13 +39,16 @@ typedef struct Material
 } Material;
 
 //This should contain most common uniforms in all shaders (some values may be left empty)
+//TODO: If I ever need many shaders with different uniforms i should create a union of different Shader structs
 typedef struct Shader{
     GLuint shader_id; //shader program id
     GLuint model;
     GLuint view;
     GLuint projection;
+    GLuint normal_matrix;
     GLuint object_color;
     GLuint light_color;  
+    GLuint light_pos;
 } Shader;
 
 //maybe we will add stuff like orientation, fov, position and such as additional variables for easier read
@@ -131,10 +135,11 @@ static void camera_update_matrices(Camera* camera, const Shader* shader)
 }
 
 //this sends camera view and projection matrices to the shader
-static void camera_matrices_to_uniform(Camera* camera, const Shader* shader)
+static void camera_to_uniform(Camera* camera, const Shader* shader)
 {
     glUniformMatrix4fv(shader->view, 1, GL_FALSE, (float*)camera->view_matrix);
     glUniformMatrix4fv(shader->projection, 1, GL_FALSE, (float*)camera->projection_matrix);
+    // /glUniform3fv(shader->projection, 1, GL_FALSE, (float*)camera->pos);
 }
 
 
@@ -219,8 +224,9 @@ static void set_default_opengl()
 {
     glDisable(GL_SCISSOR_TEST); 
     glEnable(GL_DEPTH_TEST);
-    //glEnable(GL_CULL_FACE); // i need to adjust my indices for this to work
-    glDisable(GL_BLEND);
+    //this requires all indices to be specified CCW to work (as long as that's the mode set in opengl, which is default)
+    glEnable(GL_CULL_FACE); 
+    glDisable(GL_BLEND);    
 }
 static void create_material(Material* material, Shader* shader, GLuint texture_id, vec3 color)
 {
@@ -229,6 +235,7 @@ static void create_material(Material* material, Shader* shader, GLuint texture_i
     material->texture_id = texture_id;
 
     //small trick so i won't need to make a new shader for only colors
+    //TODO: this texture should already exist before the function is called
     if(texture_id == 0)
     {
         GLuint white_tex;
@@ -255,10 +262,12 @@ static void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* 
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_size, indices, GL_STATIC_DRAW);
     mesh->EBO_size = i_size/sizeof(unsigned);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3*sizeof(float)));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3*sizeof(float)));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(5*sizeof(float)));
     glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1); 
+    glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2); 
 }
 
 //helper functions 
@@ -266,84 +275,91 @@ static void create_textured_cube_mesh(Mesh* mesh)
 {
     float vertices[] = {
         // Front face
-        -1.0f, -1.0f,  1.0f,  0.0f, 0.0f, // Bottom-left
-         1.0f, -1.0f,  1.0f,  1.0f, 0.0f, // Bottom-right
-         1.0f,  1.0f,  1.0f,  1.0f, 1.0f, // Top-right
-        -1.0f,  1.0f,  1.0f,  0.0f, 1.0f, // Top-left
+        -1.0f, -1.0f,  1.0f/*vertex*/ , 0.0f, 0.0f/*texture coord*/, 0.0f, 0.0f, 1.0f/*normal*/, // Bottom-left
+         1.0f, -1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 0.0f, 1.0f,// Bottom-right
+         1.0f,  1.0f,  1.0f,  1.0f, 1.0f, 0.0f, 0.0f, 1.0f,// Top-right
+        -1.0f,  1.0f,  1.0f,  0.0f, 1.0f, 0.0f, 0.0f, 1.0f,// Top-left
     
         // Back face
-        -1.0f, -1.0f, -1.0f,  1.0f, 0.0f, // Bottom-left (mirrored for back)
-         1.0f, -1.0f, -1.0f,  0.0f, 0.0f, 
-         1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 
-        -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,
+        -1.0f, -1.0f, -1.0f,  1.0f, 0.0f, 0.0f, 0.0f, -1.0f,// Bottom-left (mirrored for back)
+         1.0f, -1.0f, -1.0f,  0.0f, 0.0f, 0.0f, 0.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 0.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,  1.0f, 1.0f, 0.0f, 0.0f, -1.0f,
     
         // Left face
-        -1.0f,  1.0f,  1.0f,  1.0f, 1.0f, // Top-right
-        -1.0f,  1.0f, -1.0f,  0.0f, 1.0f, // Top-left
-        -1.0f, -1.0f, -1.0f,  0.0f, 0.0f, // Bottom-left
-        -1.0f, -1.0f,  1.0f,  1.0f, 0.0f, // Bottom-right
+        -1.0f,  1.0f,  1.0f,  1.0f, 1.0f, -1.0f, 0.0f, 0.0f,// Top-right
+        -1.0f,  1.0f, -1.0f,  0.0f, 1.0f, -1.0f, 0.0f, 0.0f,// Top-left
+        -1.0f, -1.0f, -1.0f,  0.0f, 0.0f, -1.0f, 0.0f, 0.0f,// Bottom-left
+        -1.0f, -1.0f,  1.0f,  1.0f, 0.0f, -1.0f, 0.0f, 0.0f,// Bottom-right
     
         // Right face
-         1.0f,  1.0f,  1.0f,  0.0f, 1.0f,
-         1.0f,  1.0f, -1.0f,  1.0f, 1.0f,
-         1.0f, -1.0f, -1.0f,  1.0f, 0.0f,
-         1.0f, -1.0f,  1.0f,  0.0f, 0.0f,
+         1.0f,  1.0f,  1.0f,  0.0f, 1.0f, 1.0f, 0.0f, 0.0f,
+         1.0f,  1.0f, -1.0f,  1.0f, 1.0f, 1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, -1.0f,  1.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f,  1.0f,  0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
     
         // Bottom face
-        -1.0f, -1.0f, -1.0f,  0.0f, 1.0f,
-         1.0f, -1.0f, -1.0f,  1.0f, 1.0f,
-         1.0f, -1.0f,  1.0f,  1.0f, 0.0f,
-        -1.0f, -1.0f,  1.0f,  0.0f, 0.0f,
+        -1.0f, -1.0f, -1.0f,  0.0f, 1.0f, 0.0f, -1.0f, 0.0f,
+         1.0f, -1.0f, -1.0f,  1.0f, 1.0f, 0.0f, -1.0f, 0.0f,
+         1.0f, -1.0f,  1.0f,  1.0f, 0.0f, 0.0f, -1.0f, 0.0f,
+        -1.0f, -1.0f,  1.0f,  0.0f, 0.0f, 0.0f, -1.0f, 0.0f,
     
         // Top face
-        -1.0f,  1.0f, -1.0f,  0.0f, 1.0f,
-         1.0f,  1.0f, -1.0f,  1.0f, 1.0f,
-         1.0f,  1.0f,  1.0f,  1.0f, 0.0f,
-        -1.0f,  1.0f,  1.0f,  0.0f, 0.0f
+        -1.0f,  1.0f, -1.0f,  0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+         1.0f,  1.0f, -1.0f,  1.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+         1.0f,  1.0f,  1.0f,  1.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+        -1.0f,  1.0f,  1.0f,  0.0f, 0.0f, 0.0f, 1.0f, 0.0f
         };
+    //fixed it here to be counter clockwise, 
     unsigned indices[] = {
-        // Front face (Vertices 0, 1, 2, 3)
+        // Front face 
         0, 1, 2,  2, 3, 0,
-        
-        // Back face (Vertices 4, 5, 6, 7)
-        4, 5, 6,  6, 7, 4,
-        
-        // Left face (Vertices 8, 9, 10, 11)
-        8, 9, 10,  10, 11, 8,
-        
-        // Right face (Vertices 12, 13, 14, 15)
-        12, 13, 14,  14, 15, 12,
-        
-        // Bottom face (Vertices 16, 17, 18, 19)
-        16, 17, 18,  18, 19, 16,
-        
-        // Top face (Vertices 20, 21, 22, 23)
-        20, 21, 22,  22, 23, 20
+    
+        // Back face 
+        4, 6, 5,  6, 4, 7,
+    
+        // Left face 
+        8, 9, 10, 10, 11, 8,
+    
+        // Right face 
+        12, 14, 13, 14, 12, 15,
+    
+        // Bottom face 
+        16, 17, 18, 18, 19, 16,
+    
+        // Top face 
+        20, 22, 21, 22, 20, 23
     };
     create_mesh(mesh, vertices, sizeof(vertices), indices, sizeof(indices));
 }
 
 static void create_shader(Shader* shader, const char* vertex_path, const char* fragment_path)
 {
+    //TODO: this here could log if the uniform was not found
     shader->shader_id = create_shader_program(vertex_path, fragment_path);
     shader->model = glGetUniformLocation(shader->shader_id, "model");
     shader->projection = glGetUniformLocation(shader->shader_id, "projection");
     shader->view = glGetUniformLocation(shader->shader_id, "view");
     shader->object_color = glGetUniformLocation(shader->shader_id, "object_color");
     shader->light_color = glGetUniformLocation(shader->shader_id, "light_color");
+    shader->light_pos = glGetUniformLocation(shader->shader_id, "light_pos");
+    shader->normal_matrix = glGetUniformLocation(shader->shader_id, "normal_matrix");
 }
 
+//this also updates normal matrix for the normals
 static void update_model_matrix(Object* obj)
 {
     glm_mat4_identity(obj->model_matrix);
+    // Translate -> Rotate -> Scale, this is in reversed order so what actually happens is Scale -> Rotate -> Translate, something to remember
     glm_translate(obj->model_matrix, obj->pos);
-    
     glm_rotate(obj->model_matrix, glm_rad(obj->angle[0]), (vec3){1,0,0});
     glm_rotate(obj->model_matrix, glm_rad(obj->angle[1]), (vec3){0,1,0});
     glm_rotate(obj->model_matrix, glm_rad(obj->angle[2]), (vec3){0,0,1});
-
     glm_scale(obj->model_matrix, obj->scale);
-    
+
+    glm_mat4_pick3(obj->model_matrix, obj->normal_matrix);
+    glm_mat3_inv(obj->normal_matrix, obj->normal_matrix);
+    glm_mat3_transpose(obj->normal_matrix);
 }
 
 static void create_object(Object* object, vec3 pos, vec3 angle, vec3 scale, Mesh* mesh, Material* material)
@@ -355,26 +371,33 @@ static void create_object(Object* object, vec3 pos, vec3 angle, vec3 scale, Mesh
     glm_vec3_copy(scale, object->scale);
     //i guess it's here to make sure  it's not empty
     glm_mat4_identity(object->model_matrix);
+    glm_mat3_identity(object->normal_matrix);
 }
 
 static void draw_object(Object* obj, Camera* camera)
 {
     Shader* s = obj->material->shader;
     //Check if the shader is currently active otherwise set it to active and update it's camera uniforms
+    //TODO: move this into a different function 
     if(active_program != s->shader_id)
     {
         glUseProgram(s->shader_id);
         active_program = s->shader_id;
-        camera_matrices_to_uniform(camera, s);
+        //update uniforms which require to be update whenver shader changes
+        camera_to_uniform(camera, s);
+        glUniform3fv(s->light_color, 1, (float*)light.color);
+        glUniform3fv(s->light_pos, 1, (float*)light.pos);
     }
-
-    // update the model matrix from your own parameters before sending it off to gpu
+    // update the model matrix from the struct parameters before sending it off to gpu
     update_model_matrix(obj);
 
     glBindVertexArray(obj->mesh->VAO);
+
+    //update uniforms which need to be updated regularly(could be changed in the program)
     glUniformMatrix4fv(s->model, 1, GL_FALSE, (float*)obj->model_matrix);
     glUniform3fv(s->object_color, 1, (float*)obj->material->color);
-    glUniform3fv(s->light_color, 1, (float*)light.color);
+    glUniformMatrix3fv(s->normal_matrix, 1, GL_FALSE, (float*)obj->normal_matrix);
+
     glBindTexture(GL_TEXTURE_2D, obj->material->texture_id); 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //for wireframe
     glDrawElements(GL_TRIANGLES, obj->mesh->EBO_size, GL_UNSIGNED_INT, 0);
@@ -403,17 +426,16 @@ void renderer_init(int w, int h)
     create_material(&material_magenta, &main_shader, 0, (vec3){0.99, 0.24, 0.71});
 
     create_textured_cube_mesh(&texture_cube_mesh);
-    create_object(&cube1, (vec3){0,0,-2}, (vec3){0,0,0},(vec3){1,1,1}, &texture_cube_mesh, &material1);
-    create_object(&cube2, (vec3){3,0,-2}, (vec3){45,0,0},(vec3){1,1,3}, &texture_cube_mesh, &material_magenta);
-
+    create_object(&cube1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, &texture_cube_mesh, &material1);
+    create_object(&cube2, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, &texture_cube_mesh, &material_magenta);
 
     //light source 
-    glm_vec3_copy((vec3){0.3, 0.1, 0}, light.color);
+    glm_vec3_copy((vec3){1, 1, 1}, light.color);
     glm_vec3_copy((vec3){0, 3, -2}, light.pos);
     create_shader(&light_shader, "main.vs", "light.fs");
     create_material(&material_light, &light_shader, 0, light.color);
     create_object(&light_cube, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, &texture_cube_mesh, &material_light);
-    glClearColor(0, 0, 0, 1);
+    glClearColor(0.1, 0.1, 0.1, 1);
 }
 
 void renderer_render(AppData* data)

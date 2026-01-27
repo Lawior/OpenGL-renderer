@@ -1,13 +1,8 @@
-#include "glad/glad.h"
+#include <glad/glad.h>
 #define STB_IMAGE_IMPLEMENTATION //other libs need to be above
-#include "stb/stb_image.h"
+#include <stb/stb_image.h>
  
-typedef struct {
-   GLuint id;
-   int width;
-   int height;
-   int nr_channels;
-} Texture;
+#include "3d_engine/graphic_types.h"
 
 Texture create_texture(const char* path)
 {
@@ -35,7 +30,7 @@ Texture create_texture(const char* path)
    }
    else 
    {
-      printf("Failed to load an image for a texture with path %s", full_texture_path);
+      printf("Failed to load an image for a texture with path %s: \n", full_texture_path, stbi_failure_reason());
    }
    stbi_image_free(data);
    return tex;

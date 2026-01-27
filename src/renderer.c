@@ -7,70 +7,19 @@
 #include "3d_engine/renderer.h"
 #include "3d_engine/shader.h"
 #include "3d_engine/texture.h"
-
-typedef struct Light{
-    vec3 pos;
-    vec3 color;
-} Light;
-
-typedef struct Mesh{
-    GLuint VAO;
-    GLuint EBO;
-    GLuint VBO;
-    unsigned EBO_size;
-} Mesh;
-
-typedef struct Object
-{
-    vec3 pos;
-    vec3 angle;
-    vec3 scale;
-    mat4 model_matrix; //this is the rotation scale and position int the global coordinates
-    mat3 normal_matrix; //for now i will keep it here it's basically a model matrix but transposed and inversed, idk why this math works but it does 
-    struct Mesh* mesh;
-    struct Material* material;
-} Object;
-
-typedef struct Material
-{
-    struct Shader* shader;
-    GLuint texture_id; // will be 0 if no texture
-    vec3 color;
-} Material;
-
-//This should contain most common uniforms in all shaders (some values may be left empty)
-//TODO: If I ever need many shaders with different uniforms i should create a union of different Shader structs
-typedef struct Shader{
-    GLuint shader_id; //shader program id
-    GLuint model;
-    GLuint view;
-    GLuint projection;
-    GLuint normal_matrix;
-    GLuint object_color;
-    GLuint light_color;  
-    GLuint light_pos;
-} Shader;
-
-//maybe we will add stuff like orientation, fov, position and such as additional variables for easier read
-typedef struct Camera
-{
-    float nearZ, farZ, aspect; // this is for the 
-    unsigned fov;
-    float movement_speed; // in units per second (which should be m/s in our logic)
-    float pitch, yaw; // rotation around x and y respectively (in degrees)
-    vec3 pos; // where camera 
-    vec3 direction; //direction in space this value should be always a unit vector
-    mat4 projection_matrix; 
-    mat4 view_matrix; 
-} Camera;
+#include "3d_engine/graphic_types.h"
+#include "3d_engine/model_loader.h"
 
 // this global is here so that the renderer doesn't need to query the opengl for viewport every frame but only when it's resized
 static vec2 main_viewport;
+//need this untill i make the draw calls be sorted by the shader program used
+static GLuint active_program;
 
 static Light light;
 
 static Mesh texture_cube_mesh;
-static Object cube1, cube2, light_cube;
+static Mesh model_meshes[MESH_PER_MODEL];
+static Model cube1, cube2, light_cube, loaded_model;
 static Material material1, material_magenta, material_light;
 static Texture tex1;
 
@@ -79,8 +28,6 @@ static Texture tex1;
 static Camera main_camera; 
 
 static Shader main_shader, light_shader;
-//need this untill i make the draw calls be sorted by the shader program used
-static GLuint active_program;
 
 
 static inline void camera_init(Camera* camera, int fov, vec3 pos, 
@@ -222,12 +169,14 @@ void renderer_camera_rotate(int x_rel, int y_rel)
 //it needs to be called every loop because of different library also managing the state
 static void set_default_opengl()
 {
+    glClearColor(0.1, 0.1, 0.1, 1);
     glDisable(GL_SCISSOR_TEST); 
     glEnable(GL_DEPTH_TEST);
     //this requires all indices to be specified CCW to work (as long as that's the mode set in opengl, which is default)
     glEnable(GL_CULL_FACE); 
     glDisable(GL_BLEND);    
 }
+
 static void create_material(Material* material, Shader* shader, GLuint texture_id, vec3 color)
 {
     material->shader = shader;
@@ -248,7 +197,7 @@ static void create_material(Material* material, Shader* shader, GLuint texture_i
     
 }
 
-static void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* indices, unsigned i_size)
+void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* indices, unsigned i_size)
 {
     glGenVertexArrays(1, &mesh->VAO);
     glBindVertexArray(mesh->VAO);
@@ -268,6 +217,7 @@ static void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* 
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2); 
+
 }
 
 //helper functions 
@@ -347,7 +297,7 @@ static void create_shader(Shader* shader, const char* vertex_path, const char* f
 }
 
 //this also updates normal matrix for the normals
-static void update_model_matrix(Object* obj)
+static void update_model_matrix(Model* obj)
 {
     glm_mat4_identity(obj->model_matrix);
     // Translate -> Rotate -> Scale, this is in reversed order so what actually happens is Scale -> Rotate -> Translate, something to remember
@@ -362,21 +312,25 @@ static void update_model_matrix(Object* obj)
     glm_mat3_transpose(obj->normal_matrix);
 }
 
-static void create_object(Object* object, vec3 pos, vec3 angle, vec3 scale, Mesh* mesh, Material* material)
+static void create_model(Model* model, unsigned mesh_num, vec3 pos, vec3 angle, vec3 scale, Mesh* mesh, Material* material)
 {
-    object->mesh = mesh;
-    object->material = material;
-    glm_vec3_copy(pos, object->pos);
-    glm_vec3_copy(angle, object->angle);
-    glm_vec3_copy(scale, object->scale);
+    model->mesh_num = mesh_num;
+    model->material = material;
+    glm_vec3_copy(pos, model->pos);
+    glm_vec3_copy(angle, model->angle);
+    glm_vec3_copy(scale, model->scale);
     //i guess it's here to make sure  it's not empty
-    glm_mat4_identity(object->model_matrix);
-    glm_mat3_identity(object->normal_matrix);
+    glm_mat4_identity(model->model_matrix);
+    glm_mat3_identity(model->normal_matrix);
+    for (unsigned i = 0; i < mesh_num; i++)
+    {
+        model->mesh[i] = &mesh[i];
+    }
 }
 
-static void draw_object(Object* obj, Camera* camera)
+static void draw_model(Model* model, Camera* camera)
 {
-    Shader* s = obj->material->shader;
+    Shader* s = model->material->shader;
     //Check if the shader is currently active otherwise set it to active and update it's camera uniforms
     //TODO: move this into a different function 
     if(active_program != s->shader_id)
@@ -389,18 +343,21 @@ static void draw_object(Object* obj, Camera* camera)
         glUniform3fv(s->light_pos, 1, (float*)light.pos);
     }
     // update the model matrix from the struct parameters before sending it off to gpu
-    update_model_matrix(obj);
+    update_model_matrix(model);
 
-    glBindVertexArray(obj->mesh->VAO);
+    for (unsigned i = 0; i < model->mesh_num; i++)
+    {
+        glBindVertexArray(model->mesh[i]->VAO);
 
-    //update uniforms which need to be updated regularly(could be changed in the program)
-    glUniformMatrix4fv(s->model, 1, GL_FALSE, (float*)obj->model_matrix);
-    glUniform3fv(s->object_color, 1, (float*)obj->material->color);
-    glUniformMatrix3fv(s->normal_matrix, 1, GL_FALSE, (float*)obj->normal_matrix);
+        //update uniforms which need to be updated regularly(could be changed in the program)
+        glUniformMatrix4fv(s->model, 1, GL_FALSE, (float*)model->model_matrix);
+        glUniform3fv(s->object_color, 1, (float*)model->material->color);
+        glUniformMatrix3fv(s->normal_matrix, 1, GL_FALSE, (float*)model->normal_matrix);
 
-    glBindTexture(GL_TEXTURE_2D, obj->material->texture_id); 
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //for wireframe
-    glDrawElements(GL_TRIANGLES, obj->mesh->EBO_size, GL_UNSIGNED_INT, 0);
+        glBindTexture(GL_TEXTURE_2D, model->material->texture_id); 
+        //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //for wireframe
+        glDrawElements(GL_TRIANGLES, model->mesh[i]->EBO_size, GL_UNSIGNED_INT, 0);
+    }
 }
 //this resizes the ViewPort and changes main camera aspect ratio
 void renderer_resize(int w, int h)
@@ -421,36 +378,39 @@ void renderer_init(int w, int h)
     renderer_resize(w, h);
 
     create_shader(&main_shader, "main.vs", "main.fs");
-    tex1 = create_texture("epic_texture.jpg");
+    tex1 = create_texture("gnomed.jpg");
     create_material(&material1, &main_shader, tex1.id, (vec3){1,1,1});
     create_material(&material_magenta, &main_shader, 0, (vec3){0.99, 0.24, 0.71});
 
     create_textured_cube_mesh(&texture_cube_mesh);
-    create_object(&cube1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, &texture_cube_mesh, &material1);
-    create_object(&cube2, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, &texture_cube_mesh, &material_magenta);
+    create_model(&cube1, 1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, &texture_cube_mesh, &material1);
+    create_model(&cube2, 1, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, &texture_cube_mesh, &material_magenta);
 
     //light source 
     glm_vec3_copy((vec3){1, 1, 1}, light.color);
     glm_vec3_copy((vec3){0, 3, -2}, light.pos);
     create_shader(&light_shader, "main.vs", "light.fs");
     create_material(&material_light, &light_shader, 0, light.color);
-    create_object(&light_cube, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, &texture_cube_mesh, &material_light);
-    glClearColor(0.1, 0.1, 0.1, 1);
+    create_model(&light_cube, 1, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, &texture_cube_mesh, &material_light);
+
+    load_static_model("gnome.glb", &loaded_model, model_meshes);
+    create_model(&loaded_model, loaded_model.mesh_num, (vec3){0,1.5,-2}, (vec3){0,0,0}, (vec3){0.002,0.002,0.002}, model_meshes, &material1);
 }
 
 void renderer_render(AppData* data)
 {
     set_default_opengl();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    //this is essential for draw_object to set it's own shader 
+    //this is essential for draw_model to set it's own shader 
     active_program = 0;
 
     camera_update_matrices(&main_camera, &main_shader);
     //glm_vec3_copy((vec3){(float)clock() / CLOCKS_PER_SEC,(float)clock() / CLOCKS_PER_SEC,0}, cube1.angle);
     //glm_vec3_copy((vec3){(float)clock() / CLOCKS_PER_SEC,0,0}, cube1.angle);
-    draw_object(&cube1, &main_camera);
-    draw_object(&cube2, &main_camera);
-    draw_object(&light_cube, &main_camera);
+    draw_model(&cube1, &main_camera);
+    draw_model(&cube2, &main_camera);
+    draw_model(&light_cube, &main_camera);
+    draw_model(&loaded_model, &main_camera);
 }
 
 void renderer_end()

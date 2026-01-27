@@ -1,10 +1,5 @@
 #pragma once
 
-   typedef struct {
-    unsigned int id;
-    int width;
-    int height;
-    int nrChannels;
-} Texture;  
+#include "3d_engine/graphic_types.h"
 
 Texture create_texture(const char* path);

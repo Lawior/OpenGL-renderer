@@ -5,11 +5,6 @@
 
 #include "glad/glad.h"
 
-typedef struct Uniforms
-{
-
-} Uniforms;
-
 //helper function for logging
 static const char* get_shader_name(GLint type) {
     switch (type) {

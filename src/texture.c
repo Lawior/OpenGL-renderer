@@ -4,7 +4,27 @@
  
 #include "3d_engine/graphic_types.h"
 
-Texture create_texture(const char* path)
+Texture texture_create_color(vec3 color)
+{
+   Texture tex;
+   glGenTextures(1, &tex.id);
+   glBindTexture(GL_TEXTURE_2D, tex.id);
+
+   // just in case
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); 
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1, 1, 0, GL_RGB, GL_FLOAT, color);
+   tex.height = 1;
+   tex.width = 1;
+   tex.nr_channels = 3;
+   return tex;
+   glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+Texture texture_create_from_file(const char* path)
 {
    const char* folder = "textures/";
 
@@ -33,5 +53,6 @@ Texture create_texture(const char* path)
       printf("Failed to load an image for a texture with path %s: \n", full_texture_path, stbi_failure_reason());
    }
    stbi_image_free(data);
+   glBindTexture(GL_TEXTURE_2D, 0);
    return tex;
 }

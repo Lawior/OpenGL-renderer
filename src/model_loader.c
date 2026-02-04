@@ -5,6 +5,7 @@
 
 #include "3d_engine/graphic_types.h"
 #include "3d_engine/renderer.h"
+#include "3d_engine/resource_manager.h"
 
 #ifdef ASSIMP_DOUBLE_PRECISION
     #error "Code is not made to support double precision"
@@ -19,11 +20,14 @@ static void assimp_mat4_to_cglm_mat4(mat4 to, struct aiMatrix4x4* from)
 }
 
 // returns non 0 on success
+//loads model at origin point 0 0 0 and at scale 1 1 1 
 int load_static_model(char* path,
-    Model* model, //model buffer to fill some variables, here for now
-    Mesh* meshes //mesh buffer to be filled
+    Material* material // passing the material for now, as we don't load it from the model yet
 )
 {
+
+    unsigned mesh_indices[MESH_PER_MODEL];
+    Mesh meshes[MESH_PER_MODEL];
     char* folder = "models/";
 
     // should never be exceeded
@@ -54,7 +58,7 @@ int load_static_model(char* path,
         return 0;
     }
     
-
+    
     for (unsigned i = 0; i < scene->mNumMeshes; i++)
     {
         struct aiMesh* assimp_mesh = scene->mMeshes[i];
@@ -115,11 +119,13 @@ int load_static_model(char* path,
             vertices, vertices_stride * assimp_mesh->mNumVertices * sizeof(float), 
             indices, indices_stride * assimp_mesh->mNumFaces * sizeof(unsigned)
         );
+        mesh_indices[i] = rm_add_mesh(meshes[i]);
         
         free(indices);
         free(vertices);
     }
-    model->mesh_num = scene->mNumMeshes;
+    
+    model_create_named(path, scene->mNumMeshes, (vec3){0,0,0}, (vec3){0,0,0}, (vec3){1,1,1}, mesh_indices, material);
 
     aiReleaseImport(scene);
     aiDetachLogStream(&s);

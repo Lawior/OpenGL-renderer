@@ -71,7 +71,7 @@ static void menu_render(AppData* data)
         }
     }
     nk_end(ctx);
-    renderer_render(data); //main rendering done here
+    renderer_render(data->delta); //main rendering done here
     nk_sdl_render(NK_ANTI_ALIASING_OFF, MAX_VERTEX_MEMORY, MAX_ELEMENT_MEMORY); //menu rendered here
 }
 
@@ -90,6 +90,12 @@ static void playing_input(AppData* data, SDL_Event *e)
     }
     // move camera according with summed mouse inputs
     renderer_camera_rotate(mouse_x, mouse_y);
+}
+
+//wrapper, idk if there is ever gonna be more here
+static void playing_render(AppData* data)
+{
+    renderer_render(data->delta);
 }
 
 static void playing_update(AppData* data)
@@ -123,7 +129,7 @@ static void menu_on_enter()
 const AppStateFunctions APPSTATE_TABLE[APPSTATE_COUNT] = {
     [APPSTATE_PLAYING] = { //this makes it so even if the enum value changes the table still works
         .enter = playing_on_enter,
-        .render = renderer_render,
+        .render = playing_render,
         .update = playing_update,
         .handle_input = playing_input,
         .exit = dummy_func

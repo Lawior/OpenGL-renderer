@@ -9,6 +9,7 @@
 #include "3d_engine/texture.h"
 #include "3d_engine/graphic_types.h"
 #include "3d_engine/model_loader.h"
+#include "3d_engine/resource_manager.h"
 
 // this global is here so that the renderer doesn't need to query the opengl for viewport every frame but only when it's resized
 static vec2 main_viewport;
@@ -17,11 +18,9 @@ static GLuint active_program;
 
 static Light light;
 
-static Mesh texture_cube_mesh;
-static Mesh model_meshes[MESH_PER_MODEL];
-static Model cube1, cube2, light_cube, loaded_model;
-static Material material1, material_magenta, material_light;
-static Texture tex1;
+static Material material1, material_magenta, material_yellow, material_red, material_light;
+
+static unsigned gnome_index1, gnome_index2, gnome_index3;
 
 // this is the main camera, it is used in quite a few functions which are called from outside the file in fact all renderer_ for the 
 // camer use this
@@ -173,7 +172,7 @@ static void set_default_opengl()
     glDisable(GL_SCISSOR_TEST); 
     glEnable(GL_DEPTH_TEST);
     //this requires all indices to be specified CCW to work (as long as that's the mode set in opengl, which is default)
-    glEnable(GL_CULL_FACE); 
+    //glEnable(GL_CULL_FACE); 
     glDisable(GL_BLEND);    
 }
 
@@ -181,20 +180,14 @@ static void create_material(Material* material, Shader* shader, GLuint texture_i
 {
     material->shader = shader;
     glm_vec3_copy(color, material->color);
+    
     material->texture_id = texture_id;
-
     //small trick so i won't need to make a new shader for only colors
-    //TODO: this texture should already exist before the function is called
     if(texture_id == 0)
     {
-        GLuint white_tex;
-        glGenTextures(1, &white_tex);
-        glBindTexture(GL_TEXTURE_2D, white_tex);
-        unsigned char white_pixel[] = { 255, 255, 255, 255 };
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
-        material->texture_id = white_tex;
+        Texture tex = rm_get_texture(DEFAULT_TEXTURE);
+        material->texture_id = tex.id;
     }
-    
 }
 
 void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* indices, unsigned i_size)
@@ -221,7 +214,7 @@ void create_mesh(Mesh* mesh, float* vertices, unsigned v_size, unsigned* indices
 }
 
 //helper functions 
-static void create_textured_cube_mesh(Mesh* mesh)
+void mesh_create_primitive_cube(Mesh* mesh)
 {
     float vertices[] = {
         // Front face
@@ -281,6 +274,7 @@ static void create_textured_cube_mesh(Mesh* mesh)
         20, 22, 21, 22, 20, 23
     };
     create_mesh(mesh, vertices, sizeof(vertices), indices, sizeof(indices));
+    
 }
 
 static void create_shader(Shader* shader, const char* vertex_path, const char* fragment_path)
@@ -312,7 +306,14 @@ static void update_model_matrix(Model* obj)
     glm_mat3_transpose(obj->normal_matrix);
 }
 
-static void create_model(Model* model, unsigned mesh_num, vec3 pos, vec3 angle, vec3 scale, Mesh* mesh, Material* material)
+void model_set_pos(Model* model, float x, float y, float z)
+{
+    model->pos[0] = x;
+    model->pos[1] = y;
+    model->pos[2] = z;
+}
+
+void create_model(Model* model, unsigned mesh_num, vec3 pos, vec3 angle, vec3 scale, unsigned* mesh_i, Material* material)
 {
     model->mesh_num = mesh_num;
     model->material = material;
@@ -324,8 +325,31 @@ static void create_model(Model* model, unsigned mesh_num, vec3 pos, vec3 angle, 
     glm_mat3_identity(model->normal_matrix);
     for (unsigned i = 0; i < mesh_num; i++)
     {
-        model->mesh[i] = &mesh[i];
+        model->mesh_index[i] = mesh_i[i];
     }
+}
+
+// temporary help
+void model_create_named(char* name, unsigned mesh_num, vec3 pos, vec3 angle, vec3 scale, unsigned* mesh_i, Material* material)
+{
+    Model* model = rm_next_named_model(name);
+    create_model(model, mesh_num, pos, angle, scale, mesh_i, material);
+}
+
+//if the model is already loaded it will be copied and a name will be set in hashmap (fallback_name)
+void model_create_from_file(char* path, char* fallback_name, Material* material)
+{
+    unsigned index = rm_get_named_model_index(path);
+    if(index == 0) load_static_model(path, material);
+    else 
+    {
+        unsigned new_i = rm_copy_named_model(path, fallback_name);
+        Model* model = rm_get_model_buffer();
+        // set initial position
+        model_set_pos(&model[new_i], 0, 0, 0);
+        model[new_i].material = material;
+    }
+
 }
 
 static void draw_model(Model* model, Camera* camera)
@@ -345,9 +369,12 @@ static void draw_model(Model* model, Camera* camera)
     // update the model matrix from the struct parameters before sending it off to gpu
     update_model_matrix(model);
 
+    
     for (unsigned i = 0; i < model->mesh_num; i++)
     {
-        glBindVertexArray(model->mesh[i]->VAO);
+        const Mesh* mesh = rm_get_mesh_buffer();
+
+        glBindVertexArray(mesh[model->mesh_index[i]].VAO);
 
         //update uniforms which need to be updated regularly(could be changed in the program)
         glUniformMatrix4fv(s->model, 1, GL_FALSE, (float*)model->model_matrix);
@@ -356,9 +383,20 @@ static void draw_model(Model* model, Camera* camera)
 
         glBindTexture(GL_TEXTURE_2D, model->material->texture_id); 
         //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); //for wireframe
-        glDrawElements(GL_TRIANGLES, model->mesh[i]->EBO_size, GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, mesh[model->mesh_index[i]].EBO_size, GL_UNSIGNED_INT, 0);
     }
 }
+
+static void draw_models_buffer(Camera* camera)
+{
+    unsigned limit = rm_get_model_count();
+    const Model* models = rm_get_model_buffer();
+    for (unsigned i = 1; i < limit; i++)
+    {
+        draw_model(&models[i], camera);
+    }
+}
+
 //this resizes the ViewPort and changes main camera aspect ratio
 void renderer_resize(int w, int h)
 {
@@ -371,46 +409,75 @@ void renderer_resize(int w, int h)
 
 void renderer_init(int w, int h)
 {
+    rm_init();
     camera_init(&main_camera, 90, (vec3){0,1,1},
                 0.1, 100, 
                 10,
                 0, -90); //face forward at the start
     renderer_resize(w, h);
 
-    create_shader(&main_shader, "main.vs", "main.fs");
-    tex1 = create_texture("gnomed.jpg");
-    create_material(&material1, &main_shader, tex1.id, (vec3){1,1,1});
-    create_material(&material_magenta, &main_shader, 0, (vec3){0.99, 0.24, 0.71});
+    rm_reg_texture("gnomed.jpg", texture_create_from_file("gnomed.jpg"));
+    rm_reg_texture("epic_texture.jpg", texture_create_from_file("epic_texture.jpg"));
 
-    create_textured_cube_mesh(&texture_cube_mesh);
-    create_model(&cube1, 1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, &texture_cube_mesh, &material1);
-    create_model(&cube2, 1, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, &texture_cube_mesh, &material_magenta);
+    create_shader(&main_shader, "main.vs", "main.fs");
+    
+    create_material(&material1, &main_shader, rm_get_texture("epic_texture.jpg").id, (vec3){1,1,1});
+    create_material(&material_magenta, &main_shader, 0, (vec3){0.99, 0.24, 0.71});
+    create_material(&material_yellow, &main_shader, 0, (vec3){1, 0.984, 0});
+    create_material(&material_red, &main_shader, 0, (vec3){1, 0, 0});
+
+    model_create_named("cube1", 1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, (unsigned[]){MESH_CUBE}, &material1);
+    model_create_named("cube2", 1, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, (unsigned[]){MESH_CUBE}, &material_magenta);
 
     //light source 
     glm_vec3_copy((vec3){1, 1, 1}, light.color);
     glm_vec3_copy((vec3){0, 3, -2}, light.pos);
     create_shader(&light_shader, "main.vs", "light.fs");
     create_material(&material_light, &light_shader, 0, light.color);
-    create_model(&light_cube, 1, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, &texture_cube_mesh, &material_light);
+    model_create_named("light_cube", 1, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, (unsigned[]){MESH_CUBE}, &material_light);
 
-    load_static_model("gnome.glb", &loaded_model, model_meshes);
-    create_model(&loaded_model, loaded_model.mesh_num, (vec3){0,1.5,-2}, (vec3){0,0,0}, (vec3){0.002,0.002,0.002}, model_meshes, &material1);
+    model_create_from_file("gnome.glb", "gnome.glb",  &material_magenta);
+    model_create_from_file("gnome.glb", "gnome2",  &material_yellow);
+    model_create_from_file("gnome.glb", "gnome3",  &material_red);
+
+    gnome_index1 = rm_get_named_model_index("gnome.glb");
+    gnome_index2 = rm_get_named_model_index("gnome2");
+    gnome_index3 = rm_get_named_model_index("gnome3");
+    glm_vec3_copy((vec3){0.002, 0.002, 0.002}, rm_get_model_buffer()[gnome_index1].scale);
+    glm_vec3_copy((vec3){0.002, 0.002, 0.002}, rm_get_model_buffer()[gnome_index2].scale);
+    glm_vec3_copy((vec3){0.004, 0.004, 0.004}, rm_get_model_buffer()[gnome_index3].scale);
+    glm_vec3_copy((vec3){0, 0, 0}, rm_get_model_buffer()[gnome_index1].pos);
+    glm_vec3_copy((vec3){-2, 0, 0}, rm_get_model_buffer()[gnome_index2].pos);
+    glm_vec3_copy((vec3){-5, 0, 0}, rm_get_model_buffer()[gnome_index3].pos);
 }
 
-void renderer_render(AppData* data)
+void renderer_render(double delta_time)
 {
     set_default_opengl();
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    
     //this is essential for draw_model to set it's own shader 
     active_program = 0;
 
+    Model* buffer = rm_get_model_buffer();
+    
+    //below just some funny stuff
+    static int direction = 1;
+    if(buffer[gnome_index1].pos[1] < 10 && direction) {buffer[gnome_index1].pos[1] += delta_time*10; direction = 1;}
+    else if(buffer[gnome_index1].pos[1] > -10) {buffer[gnome_index1].pos[1] -= delta_time*10; direction = 0;}
+    else direction = 1;
+    buffer[gnome_index1].angle[1] += delta_time * 1000;
+    buffer[gnome_index1].angle[0] += delta_time * 1000;
+
+
+    static int stretch = 1;
+    if(buffer[gnome_index3].scale[2] < 0.10 && stretch) {buffer[gnome_index3].scale[2]+=delta_time*0.0005; stretch = 1;}
+    else if(buffer[gnome_index3].scale[2] > 0.004) {buffer[gnome_index3].scale[2]-=delta_time*0.0005; stretch = 0;}
+    else stretch = 1;
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     camera_update_matrices(&main_camera, &main_shader);
-    //glm_vec3_copy((vec3){(float)clock() / CLOCKS_PER_SEC,(float)clock() / CLOCKS_PER_SEC,0}, cube1.angle);
     //glm_vec3_copy((vec3){(float)clock() / CLOCKS_PER_SEC,0,0}, cube1.angle);
-    draw_model(&cube1, &main_camera);
-    draw_model(&cube2, &main_camera);
-    draw_model(&light_cube, &main_camera);
-    draw_model(&loaded_model, &main_camera);
+    draw_models_buffer(&main_camera);
 }
 
 void renderer_end()

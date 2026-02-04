@@ -5,6 +5,7 @@
 #include <cglm/cglm.h>
 
 #define MESH_PER_MODEL 32
+#define DEFAULT_COLOR (vec3){1,1,1}
 
 typedef struct Light{
     vec3 pos;
@@ -25,7 +26,7 @@ typedef struct Model
     vec3 scale;
     mat4 model_matrix; //this is the rotation scale and position int the global coordinates
     mat3 normal_matrix; //for now i will keep it here it's basically a model matrix but transposed and inversed, idk why this math works but it does 
-    struct Mesh* mesh[MESH_PER_MODEL];
+    unsigned mesh_index[MESH_PER_MODEL];
     unsigned mesh_num;
     struct Material* material;
 } Model;

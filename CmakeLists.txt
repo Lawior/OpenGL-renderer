@@ -26,7 +26,7 @@ opengl32
 cglm 
 )
 
-
+if(WIN32)
 add_custom_command(TARGET 3d_engine POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "C:/msys64/ucrt64/bin/SDL2.dll"
@@ -35,11 +35,13 @@ add_custom_command(TARGET 3d_engine POST_BUILD
     "C:/msys64/ucrt64/bin/libgcc_s_seh-1.dll"
     "C:/msys64/ucrt64/bin/libassimp-6.dll"
     "C:/msys64/ucrt64/bin/libstdc++-6.dll" #because assimp is a c++ library
-    #below assimp dependencies
+    #below assimp dependencies (allegedly)
     "C:/msys64/ucrt64/bin/zlib1.dll"             # Required for many model formats
     "C:/msys64/ucrt64/bin/libzstd.dll"           # Required for modern glTF/FBX
     "C:/msys64/ucrt64/bin/libminizip-1.dll"
+    "C:/msys64/ucrt64/bin/libbz2-1.dll"
     $<TARGET_FILE_DIR:3d_engine>)
+endif()
 
 #copying the shaders folders into build directory, in the future i will propably move to embedding those directly in the source files
 #I just need a good script that would do that

@@ -22,9 +22,14 @@ target_link_libraries(${PROJECT_NAME}
 PRIVATE SDL2::SDL2main 
 SDL2::SDL2
 assimp::assimp
-opengl32
-cglm 
-)
+cglm)
+
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
+elseif(UNIX)
+    target_link_libraries(${PROJECT_NAME} PRIVATE GL 
+    m)
+endif()
 
 if(WIN32)
 add_custom_command(TARGET 3d_engine POST_BUILD

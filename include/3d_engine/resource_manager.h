@@ -6,14 +6,29 @@
 typedef enum DefaultMeshes
 {
     MESH_INVALID,
-    MESH_CUBE
+    MESH_CUBE,
+    MESH_DEFAULT_COUNT
 
 } DefaultMeshes;
 
 typedef enum DefaultModels
 {
-    MODEL_INVALID
+    MODEL_INVALID,
+    MODEL_DEFAULT_COUNT
 } DefaultModels;
+
+typedef struct TextureHashMap
+{
+    char *key;
+    Texture value;
+} TextureHashMap;
+
+//maps id values to indices in a buffer
+typedef struct ModelHashMap
+{
+    char* key;
+    unsigned value;
+} ModelHashMap;
 
 // some macros to specify the size of preallocation for buffers 
 #define MESH_BUFFER_SIZE 256
@@ -36,6 +51,8 @@ Model* rm_next_named_model(char* name);
 unsigned rm_copy_named_model(char* name, char* name_dest);
 unsigned rm_get_named_model_index(char* name);
 unsigned rm_add_named_model(char* name, Model model);
+unsigned rm_get_named_model_count();
+ModelHashMap* rm_get_named_model_hashmap();
 unsigned rm_add_model(Model model);
 unsigned rm_get_model_count();
 Model* rm_get_model_buffer();

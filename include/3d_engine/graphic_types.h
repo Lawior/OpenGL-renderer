@@ -10,6 +10,7 @@
 typedef struct Light{
     vec3 pos;
     vec3 color;
+    unsigned model_index; // index of the model that is the representation of the light source, 0 if no model
 } Light;
 
 typedef struct Mesh{

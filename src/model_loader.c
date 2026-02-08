@@ -68,7 +68,7 @@ int load_static_model(char* path,
         //Get the uvCoordinate coresponding to the diffuse texture, otherwise assume that it's at index 0
         unsigned uv_index = 0;
         //macro AI_MATKEY_UVWSRC_DIFFUSE(0) expands to the 3 arguments needed by the function
-        if(aiGetMaterialInteger(material, AI_MATKEY_UVWSRC_DIFFUSE(0), &uv_index) != aiReturn_SUCCESS) uv_index = 0;
+        if(aiGetMaterialIntegerArray(material, AI_MATKEY_UVWSRC_DIFFUSE(0), &uv_index, NULL) != aiReturn_SUCCESS) uv_index = 0;
 
         if(assimp_mesh->mNormals == NULL)
         {

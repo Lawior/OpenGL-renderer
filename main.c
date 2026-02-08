@@ -13,10 +13,12 @@
 #include "3d_engine/renderer.h"
 #include "3d_engine/app_state.h"
 
+#define UPDATE_LOGIC_HZ 128LLU //how many times a second does update logic run
+
 // This will handle the main state transition
 // I was thinking of implementing but for this project i am not planning a lot of different input states
 
-void start_SDL(SDL_Window** window, SDL_GLContext** glcontext)
+void start_SDL(SDL_Window** window, SDL_GLContext** glcontext, AppData* data)
 {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS|SDL_INIT_TIMER) < 0) {
         printf("SDL could not initialize. SDL_Error: %s\n", SDL_GetError());
@@ -48,21 +50,23 @@ void start_SDL(SDL_Window** window, SDL_GLContext** glcontext)
         exit(1);
     }
 
-
     *glcontext = SDL_GL_CreateContext(*window);
     if (*glcontext == NULL) {
         printf("Some issue creating OpenGL context. SDL_Error: %s\n", SDL_GetError());
         SDL_Quit();
         exit(1);
     }
-    /*if(SDL_GL_SetSwapInterval(-1) < 0)
+
+    if(SDL_GL_SetSwapInterval(-1) < 0)
     {
         printf("Adaptive VSync not supported");
         if (SDL_GL_SetSwapInterval(1) < 0) 
         {
             printf("VSync not supported: %s\n", SDL_GetError());
         }
-    }*/
+        else data->flags |= APPSTATEFLAG_VSYNC_ON;
+    }
+    else data->flags |= APPSTATEFLAG_VSYNC_ON;
 
     //initialize glad for the acces to opengl stuff
     if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
@@ -89,54 +93,69 @@ void fps_counter(double delta_time)
     }
 }
 
+int get_refresh_rate(SDL_Window* window)
+{
+    int display_index = SDL_GetWindowDisplayIndex(window);
+
+    SDL_DisplayMode mode;
+    if (SDL_GetCurrentDisplayMode(display_index, &mode) == 0)
+    {
+        //another fallback
+        if(mode.refresh_rate == 0) return 60;
+        else return mode.refresh_rate;
+    }
+    //fallback
+    return 60;
+}
 
 int main(int argc, char *argv[]) 
 {
 
     SDL_Window* window;
     SDL_GLContext* glcontext;
-    start_SDL(&window, &glcontext);
+    AppData app_data = {0}; //0 so there is no garbage
+    start_SDL(&window, &glcontext, &app_data);
     struct nk_context* ctx = nk_sdl_init(window);
-
+    
     //The current state of the app
     AppState app_state;
     start_state(&app_state, APPSTATE_PLAYING);
-    AppData app_data;
 
     //this is for matching the window pixel coordinate space to opngl (-1, 1) coordinate space
     //TODO: Maybe this should be somewhere else? We will be calling it every time we resize the window tho
     SDL_GL_GetDrawableSize(window, &app_data.w, &app_data.h);
-    renderer_init(app_data.w, app_data.h);
+    app_data.rd_ctx = renderer_init(app_data.w, app_data.h);
 
     struct nk_font_atlas *atlas;
     nk_sdl_font_stash_begin(&atlas);
     //I think this is where custom fonts go
     nk_sdl_font_stash_end();
-    
-
-    //keyboard state array, allows for easier continous input (don't need to SDL_KEYDOWN SDL_KEYUP with some boolean)
-
-    uint64_t t_new = SDL_GetPerformanceCounter();
-    uint64_t t_last = 0;
-    int running = 1;
 
     app_data.ctx = ctx;
+    //keyboard state array, allows for easier continous input (don't need to SDL_KEYDOWN SDL_KEYUP with some boolean)
     app_data.k_state = SDL_GetKeyboardState(NULL);
+
+    app_data.refresh_rate = (get_refresh_rate(window));
+
+    uint64_t frequency = SDL_GetPerformanceFrequency();
+    app_data.render_accumulator = frequency / (app_data.refresh_rate + 5); // we add 5 because we want the render to happen slightly faster then the vsync (temporary solution because we don't have a thread for rendering)
+    uint64_t update_accumulator = frequency / UPDATE_LOGIC_HZ;
+    uint64_t t_new = SDL_GetPerformanceCounter();
+    uint64_t render_last_t = t_new; //the time of the last render
+    uint64_t update_last_t = t_new;
+    uint64_t t_last = 0;
+  
+    int running = 1;
 
     // Main loop divided for logic rendering and such 
     while (running) {
         t_last = t_new;
         t_new = SDL_GetPerformanceCounter();
-        app_data.delta = (double)(t_new - t_last) / (double)SDL_GetPerformanceFrequency(); //this should give delta time in between frames in second
-        
-        fps_counter(app_data.delta);
 
         SDL_Event e;
-
         //handle window events including keyboard inputs
-        nk_input_begin(ctx); //It sets some internal states in the nuklear, needs to be called right before event poll
         while (SDL_PollEvent(&e) != 0) {
-            APPSTATE_TABLE[app_state].handle_input(&app_data, &e);
+            
             switch(e.type)
             {
                 case (SDL_QUIT):
@@ -168,15 +187,29 @@ int main(int argc, char *argv[])
                     break;
                 }
             }
+            APPSTATE_TABLE[app_state].handle_input(&app_data, &e);
         }
-        nk_sdl_handle_grab(); //Handles grabbable menus, which i will propably use 
-        nk_input_end(ctx); //also sets some states but after the input is processed
 
-        APPSTATE_TABLE[app_state].update(&app_data);
+        t_new = SDL_GetPerformanceCounter(); // calling this should be cheap so it's better to have it as up to date as possible
+        if(t_new - update_last_t >= update_accumulator)
+        {
+            app_data.delta = ((double)t_new - update_last_t)/(double)frequency; //this should give delta time in between update loops we could also assume it being fixed (update_accumulator/frequency)
+            APPSTATE_TABLE[app_state].update(&app_data);
+            update_last_t += update_accumulator; //unlike the rendering part here we want to take into account the 
+        }
         
-        APPSTATE_TABLE[app_state].render(&app_data);
-        //Update the SDL window with the buffer (swapping the buffers)
-        SDL_GL_SwapWindow(window);
+        t_new = SDL_GetPerformanceCounter(); // account for the time it takes to run update
+        if((t_new - render_last_t) >= app_data.render_accumulator)
+        {
+            APPSTATE_TABLE[app_state].render(&app_data);
+            //Update the SDL window with the buffer (swapping the buffers)
+            SDL_GL_SwapWindow(window);
+
+            //take into account the time spent rendering
+            uint64_t new_render_t = SDL_GetPerformanceCounter();
+            fps_counter((double)(new_render_t - render_last_t) / (double)frequency);
+            render_last_t = new_render_t;
+        }
     }
 
     //Cleanup

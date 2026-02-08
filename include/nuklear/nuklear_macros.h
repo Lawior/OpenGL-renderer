@@ -7,3 +7,6 @@
 #define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
 #define NK_INCLUDE_FONT_BAKING
 #define NK_INCLUDE_DEFAULT_FONT
+//The following defines taken from example program as idk what to set them to anyway
+#define MAX_VERTEX_MEMORY 512 * 1024 //512 kb 
+#define MAX_ELEMENT_MEMORY 128 * 1024

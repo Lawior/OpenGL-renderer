@@ -10,19 +10,6 @@
 #include "3d_engine/texture.h"
 #include "3d_engine/renderer.h"
 
-typedef struct TextureHashMap
-{
-    char *key;
-    Texture value;
-} TextureHashMap;
-
-//maps id values to indices in a buffer
-typedef struct ModelHashMap
-{
-    char* key;
-    unsigned value;
-} ModelHashMap;
-
 //this maps string values of filenames (and any specified name) to Texture struct NOTE: idk if the Texture struct is needed it would work if it was mapping to the GLUINT id
 static TextureHashMap* texture_hash_map = NULL;
 
@@ -32,7 +19,7 @@ static ModelHashMap* model_hash_map = NULL;
 static Model* model_buffer = NULL;
 
 //dynamic array
-//TODO: Maybe each model should just have the mesh buffer, it would definetely make freeing it infinitely easier. Or maybe the mesh buffer could just contain some primitives like cubes?
+//TODO: Maybe each model should just have the mesh buffer, it would definetely make freeing it infinitely easier. Or maybe the mesh buffer could just contain some primitives like cubes that never need to be freed?
 static Mesh* mesh_buffer = NULL;
 
 // registers texture in hashmap
@@ -90,6 +77,7 @@ unsigned rm_get_named_model_index(char* name)
 {
     return shget(model_hash_map, name);   
 }
+
 //basically the rm_add_model but also adds name to the hashmap
 unsigned rm_add_named_model(char* name, Model model)
 {
@@ -98,14 +86,24 @@ unsigned rm_add_named_model(char* name, Model model)
     shput(model_hash_map, name, i);
 }
 
+unsigned rm_get_named_model_count()
+{
+    return shlenu(model_hash_map);
+}
+
+ModelHashMap* rm_get_named_model_hashmap()
+{
+    return model_hash_map;
+}
+
 unsigned rm_add_model(Model model)
 {
     arrpush(model_buffer, model);
-    return (unsigned)(arrlen(model_buffer) - 1);
+    return (unsigned)(arrlenu(model_buffer) - 1);
 }
 
 unsigned rm_get_model_count() {
-    return (unsigned)arrlen(model_buffer);
+    return (unsigned)arrlenu(model_buffer);
 }
 // an alternative to making the buffer extern? idk
 Model* rm_get_model_buffer() {

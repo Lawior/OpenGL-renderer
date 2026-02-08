@@ -172,7 +172,7 @@ static void set_default_opengl()
     glDisable(GL_SCISSOR_TEST); 
     glEnable(GL_DEPTH_TEST);
     //this requires all indices to be specified CCW to work (as long as that's the mode set in opengl, which is default)
-    //glEnable(GL_CULL_FACE); 
+    glEnable(GL_CULL_FACE); 
     glDisable(GL_BLEND);    
 }
 
@@ -352,6 +352,30 @@ void model_create_from_file(char* path, char* fallback_name, Material* material)
 
 }
 
+void light_change_color(Light* light, float r, float g, float b)
+{
+    light->color[0] = r;
+    light->color[1] = g;
+    light->color[2] = b;
+
+    Model* model = rm_get_model_buffer();
+    model[light->model_index].material->color[0] = r;
+    model[light->model_index].material->color[1] = g;
+    model[light->model_index].material->color[2] = b;
+    
+}
+void light_change_pos(Light* light, float x, float y, float z)
+{
+    light->pos[0] = x;
+    light->pos[1] = y;
+    light->pos[2] = z;
+
+    Model* model = rm_get_model_buffer();
+    model[light->model_index].pos[0] = x;
+    model[light->model_index].pos[1] = y;
+    model[light->model_index].pos[2] = z;
+}
+
 static void draw_model(Model* model, Camera* camera)
 {
     Shader* s = model->material->shader;
@@ -407,7 +431,7 @@ void renderer_resize(int w, int h)
     main_camera.aspect = aspect;
 }
 
-void renderer_init(int w, int h)
+RendererContext renderer_init(int w, int h)
 {
     rm_init();
     camera_init(&main_camera, 90, (vec3){0,1,1},
@@ -426,6 +450,7 @@ void renderer_init(int w, int h)
     create_material(&material_yellow, &main_shader, 0, (vec3){1, 0.984, 0});
     create_material(&material_red, &main_shader, 0, (vec3){1, 0, 0});
 
+    //we add all our models to hash so we can modify them from the menu, it's not vital for rendering itself
     model_create_named("cube1", 1, (vec3){0,0,-2}, (vec3){45,0,0},(vec3){1,1,1}, (unsigned[]){MESH_CUBE}, &material1);
     model_create_named("cube2", 1, (vec3){3,0,-2}, (vec3){79,0,0},(vec3){1,14,10}, (unsigned[]){MESH_CUBE}, &material_magenta);
 
@@ -435,20 +460,22 @@ void renderer_init(int w, int h)
     create_shader(&light_shader, "main.vs", "light.fs");
     create_material(&material_light, &light_shader, 0, light.color);
     model_create_named("light_cube", 1, light.pos, (vec3){0,0,0},(vec3){0.2,0.2,0.2}, (unsigned[]){MESH_CUBE}, &material_light);
+    light.model_index = rm_get_named_model_index("light_cube");
 
     model_create_from_file("gnome.glb", "gnome.glb",  &material_magenta);
     model_create_from_file("gnome.glb", "gnome2",  &material_yellow);
     model_create_from_file("gnome.glb", "gnome3",  &material_red);
 
+    //Just something to showcase
     gnome_index1 = rm_get_named_model_index("gnome.glb");
     gnome_index2 = rm_get_named_model_index("gnome2");
     gnome_index3 = rm_get_named_model_index("gnome3");
-    glm_vec3_copy((vec3){0.002, 0.002, 0.002}, rm_get_model_buffer()[gnome_index1].scale);
-    glm_vec3_copy((vec3){0.002, 0.002, 0.002}, rm_get_model_buffer()[gnome_index2].scale);
-    glm_vec3_copy((vec3){0.004, 0.004, 0.004}, rm_get_model_buffer()[gnome_index3].scale);
+
     glm_vec3_copy((vec3){0, 0, 0}, rm_get_model_buffer()[gnome_index1].pos);
     glm_vec3_copy((vec3){-2, 0, 0}, rm_get_model_buffer()[gnome_index2].pos);
     glm_vec3_copy((vec3){-5, 0, 0}, rm_get_model_buffer()[gnome_index3].pos);
+
+    return (RendererContext){&light, &main_camera};
 }
 
 void renderer_render(double delta_time)
@@ -457,30 +484,21 @@ void renderer_render(double delta_time)
     
     //this is essential for draw_model to set it's own shader 
     active_program = 0;
-
-    Model* buffer = rm_get_model_buffer();
     
-    //below just some funny stuff
-    static int direction = 1;
-    if(buffer[gnome_index1].pos[1] < 10 && direction) {buffer[gnome_index1].pos[1] += delta_time*10; direction = 1;}
-    else if(buffer[gnome_index1].pos[1] > -10) {buffer[gnome_index1].pos[1] -= delta_time*10; direction = 0;}
-    else direction = 1;
-    buffer[gnome_index1].angle[1] += delta_time * 1000;
-    buffer[gnome_index1].angle[0] += delta_time * 1000;
-
-
-    static int stretch = 1;
-    if(buffer[gnome_index3].scale[2] < 0.10 && stretch) {buffer[gnome_index3].scale[2]+=delta_time*0.0005; stretch = 1;}
-    else if(buffer[gnome_index3].scale[2] > 0.004) {buffer[gnome_index3].scale[2]-=delta_time*0.0005; stretch = 0;}
-    else stretch = 1;
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     camera_update_matrices(&main_camera, &main_shader);
+
+    //updating the position of the light source so it matches the light source model position
+    //NOTE: temporary
+    Model* light_model = &rm_get_model_buffer()[light.model_index];
+    if(light.model_index != MODEL_INVALID) light_change_pos(&light, light_model->pos[0], light_model->pos[1], light_model->pos[2]);
+    
     //glm_vec3_copy((vec3){(float)clock() / CLOCKS_PER_SEC,0,0}, cube1.angle);
     draw_models_buffer(&main_camera);
 }
 
 void renderer_end()
 {
+    rm_clean();
     return;
 }
